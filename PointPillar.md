@@ -217,7 +217,7 @@ __具体步骤如下：__
 
 * 实现张量化后，使用一个简化的 PointNet 对点云数据进行特征提取，将 D = 9 维度转换为 C 维度，得到一个 __(C, P, N)__ 张量，接着按照 Pillar 维度(N) 进行 MaxPooling 操作，得到 __(C, P)__ 特征图，再将 __P__ 转换为 __(H, W)__, 即 P = H * W, 获取到 __(C, H, W)__ 的 __Pseudo-Image(伪图片)__    
 
-以上便完成了点云数据的张量化，直观图示如下：
+以上便完成了点云数据的张量化，直观图示如下：    
 ![PP_伪图片过程](img/PP_伪图片过程.jpg)
 
 
@@ -300,7 +300,7 @@ __在OpenPCdet中的实现如下：__
                 x_concatenated = torch.cat([x, x_repeat], dim=2)
                 return x_concatenated
 
-* 将上述伪图像生成过程导出 onnx 模型，并可视化模型结果图如下：
+* 将上述伪图像生成过程导出 onnx 模型，并可视化模型结果图如下：      
 ![PFN_onnx结构](img/PFN_onnx结构.jpg)
 
 
@@ -314,7 +314,7 @@ Backbone 有两个子网络：一个 top-down 的网络逐步降采样产生特�
 >每个 top-down 的最终特征通过上采样和 concat 进行组合。
 >>首先，对特征进行上采样，从初始步长 Up(Sin,Sout,F) 到最终 stride = Sout（两者都相对于原始伪图像）使用通道数 F 的转置卷积(__ConvTranspose__)。接下来应用 BatchNorm 和 ReLU。最终输出特征是源自不同 stride 的所有特征的 concat
 
-以上便完成了 Backbone 特征提取过程，论文图示如下：
+以上便完成了 Backbone 特征提取过程，论文图示如下：      
 ![backbone论文](img/backbone论文.png)
 
 
