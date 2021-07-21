@@ -148,13 +148,14 @@ calib文件夹下的 txt 文件，描述了各相机之间坐标换算的校准�
 * lidar representation (点云特征表达)
 * network backbone (特征提取骨干网络)
 * detection head (检测头网络)
-如下图所示:
+
+    如下图所示:     
 ![3D检测pipeline图](img/3D检测pipeline.png)
 
-在 1.2 节中已经介绍过几种常见的点云特征表达，而 PointPillars 属于其中的 __基于BEV的目标检测方法__，则该方法如下图所示：
+在 1.2 节中已经介绍过几种常见的点云特征表达，而 PointPillars 属于其中的 __基于BEV的目标检测方法__，则该方法如下图所示：     
 ![基于BEV的目标检测方法](img/基于BEV的目标检测方法.png)
 
-在本文研究的由 __mmlab__ 复现的 __openPCdet__ 框架中的实现思路如下图所示：
+在本文研究的由 __mmlab__ 复现的 __openPCdet__ 框架中的实现思路如下图所示：      
 ![OpenPCdet架构](img/openPCdet架构.png)
 
 在代码 detector3d_template.py:22 中可以看到 Detector3DTemplate 基类的网络拓扑列表如下所示，在子类中必须由配置文件描述各模块的实现方式(若无此模块可跳过)
