@@ -304,7 +304,7 @@ __在OpenPCdet中的实现如下：__
 ![PFN_onnx结构](img/PFN_onnx结构.jpg)
 
 
-3.3.2.2 Backbone Encoder特征提取
+##### 3.3.2.2 Backbone Encoder特征提取
 
 Backbone 有两个子网络：一个 top-down 的网络逐步降采样产生特征，第二个网络执行上采样和 top-down 特征的 concat。
 
@@ -433,4 +433,9 @@ Backbone 的网络实现（base_bev_backbone.py:6）：
 
 * 将上述 backbone 部分导出 onnx 模型，并可视化模型结果图如下：
 ![backbone_onnx结构](img/backbone_onnx结构.png)
+
+
+
+##### 3.3.2.3 
+
 
