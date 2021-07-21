@@ -24,7 +24,7 @@
 | __坐标值__ | 正整数         | 正/负实数 |
 | __原点__   | 左上角         | 传感器位置 |
 | __坐标轴__ | 水平-x  竖直-y | x-前  y-左  z-上 |
-| __特点__   | 缺少目标尺寸   | 缺少纹理信息 |
+| __特点__   | 缺少目标尺寸   | 缺少纹理信息,无序性,旋转性 |
 
 
 ### 1.2 点云数据特征表达
@@ -34,7 +34,7 @@
 >* 点对点特征（point-wise feature）提取
 >* 特征融合  
 
-![点云特征表达方法](点云特征表达方法.png)
+![点云特征表达方法](img/点云特征表达方法.png)
 
 
 __根据激光雷达的成像原理，可以有两种离散化方式:__
@@ -93,7 +93,7 @@ KITTI数据集的数据采集平台装配有2个灰度摄像机，2个彩色摄�
 
 |  __index__  | __Name__ | __描述__ | __范围/类型__ |
 | ------      | ------   | ------   |    ------   |
-| 1 | type | 目标类别 | 'Car', 'Van', 'Truck','Pedestrian', 'Person_sitting', 'Cyclist','Tram',  'Misc' or  'DontCare' |
+| 1 | type | 目标类别 | 'Car','Van','Truck','Pedestrian','Person_sitting','Cyclist','Tram','Misc','DontCare' |
 | 2 | truncated | 物体是否被截断 | 0（非截断）到1（截断）float |
 | 3 | occluded | 物体是否被遮挡 | 整数0，1，2，3表示被遮挡的程度 |
 | 4 | alpha | 物体的观察角度 | -pi~pi |
@@ -139,7 +139,7 @@ calib文件夹下的 txt 文件，描述了各相机之间坐标换算的校准�
 ### 3.1 前言
 > PointPillars 是2019年出自工业界的一篇Paper。该模型最主要的特点是检测速度和精度的平衡。该模型的平均检测速度达到了62Hz(i7 CPU + 1080ti GPU)，最快速度达到了105Hz，确实遥遥领先了其他的模型。截止目前依旧是kitti排行榜上速度最快的模型， 是为数不多可以应用在自动驾驶领域的模型。这里我们引入CIA-SSD模型中的精度-速度图，具体对比如下所示:
 
-![精度-速度对比图](精度速度.jpg)
+![精度-速度对比图](img/精度速度.jpg)
 
 
 ### 3.2 点云目标检测思路介绍
@@ -149,10 +149,18 @@ calib文件夹下的 txt 文件，描述了各相机之间坐标换算的校准�
 * network backbone (特征提取骨干网络)
 * detection head (检测头网络)
 如下图所示:
-![3D检测pipeline图](3D检测pipeline.png)
+![3D检测pipeline图](img/3D检测pipeline.png)
 
 在 1.2 节中已经介绍过几种常见的点云特征表达，而 PointPillars 属于其中的 __基于BEV的目标检测方法__，则该方法如下图所示：
-![基于BEV的目标检测方法](基于BEV的目标检测方法.png)
+![基于BEV的目标检测方法](img/基于BEV的目标检测方法.png)
+
+在本文研究的由 __mmlab__ 复现的 __openPCdet__ 框架中的实现思路如下图所示：
+![OpenPCdet架构](img/openPCdet架构.png)
+
+在代码 detector3d_template.py:22 中可以看到 Detector3DTemplate 基类的网络拓扑列表如下所示，在子类中必须由配置文件描述各模块的实现方式(若无此模块可跳过)
+        
+        self.module_topology = ['vfe', 'backbone_3d', 'map_to_bev_module', 'pfe', 
+                                'backbone_2d', 'dense_head',  'point_head', 'roi_head']
 
 #### 3.2.1 生成BEV图
 
@@ -178,4 +186,251 @@ Head部分包括两个任务，即：
 
 
 
-### 3.3 PointPillars 思路介绍
+### 3.3 PointPillars 介绍
+
+#### 3.3.1 VoxelNet 和 SECOND 算法概述
+
+早期的一些方法侧重于使用 __3D卷积__ 或点云到图像的投影。而最近的方法倾向于从鸟瞰角度观察激光雷达点云，这种方式的优势为没有尺度模糊和几乎没有遮挡。然而，鸟瞰图往往非常稀疏，这使得卷积神经网络的直接应用不切实际且效率低下。这个问题的一个常见解决方法是将 XY 平面划分为一个规则的网格，例如 10 x 10 厘米，然后对每个网格单元中的点进行手工特征编码方法。然而，此类方法可能不是最佳的，因为硬编码特征提取方法泛化能力较差。
+
+__VoxelNet__ 是在该领域真正进行 end2end 学习的首批方法之一。 VoxelNet 将空间划分为 voxels ，对每个 voxel 应用一个 PointNet，然后使用一个 3D卷积中间层以巩固垂直轴，然后应用 2D卷积检测架构。虽然 VoxelNet 性能很强，但 4.4Hz 的推理时间太慢，无法实时部署。 最近 __SECOND__ (使用 __稀疏3D卷积__ 替换普通 3D卷积) 提高了 VoxelNet 的推理速度，__但 3D卷积仍然是一个瓶颈。__
+
+
+#### 3.3.2 PointPillars 的思路及实现
+
+##### 3.3.2.1 伪图片生成
+
+__PointPillars__ 采用了一种不同于上述两种思路的点云建模方法。从模型的名称PointPillars可以看出，该方法将 Points 转化成一个个的 Pillar（柱体），从而构成了伪图片的数据。
+
+__具体步骤如下：__
+* 按照 XY 轴将点云划分为网格，凡落入同网格的数据被视为在一个pillar
+* 每个点用一个 __D = 9__ 维的向量表示，分别为 (x, y, z, r, xc, yc, zc, xp, yp), 其中:
+
+        (x, y, z, r) 为该点云的真实坐标信息（三维）和反射强度; 
+        (xc, yc, zc) 为该点云所处Pillar中所有点的几何中心； 
+        (xp, yp) 为 (x-xc, y-yc) ，反映了点与几何中心的相对位置。   
+
+* 假设每个样本中有 __P__ 个非空的pillars，每个pillar中有 __N__ 个点云数据，那么这个样本就可以用一个 __(D, P, N)__ 张量表示
+
+        如何保证每个 pillar 中有 N 个点云数据？
+        如果每个 pillar 中的点云数据数据超过 N 个，那么我们就随机采样至 N 个;
+        如果每个 pillar 中的点云数据数据少于 N 个，少于的部分我们就 padding 0  
+
+* 实现张量化后，使用一个简化的 PointNet 对点云数据进行特征提取，将 D = 9 维度转换为 C 维度，得到一个 __(C, P, N)__ 张量，接着按照 Pillar 维度(N) 进行 MaxPooling 操作，得到 __(C, P)__ 特征图，再将 __P__ 转换为 __(H, W)__, 即 P = H * W, 获取到 __(C, H, W)__ 的 __Pseudo-Image(伪图片)__    
+
+以上便完成了点云数据的张量化，直观图示如下：
+![PP_伪图片过程](img/PP_伪图片过程.jpg)
+
+
+__在OpenPCdet中的实现如下：__
+
+点云数据 -> 伪图片数据的实现（pillar_vfe.py:104）：
+
+    def forward(self, batch_dict, **kwargs):
+        voxel_features, voxel_num_points, coords = batch_dict['voxels'], batch_dict['voxel_num_points'], batch_dict['voxel_coords']
+        points_mean = voxel_features[:, :, :3].sum(dim=1, keepdim=True) / voxel_num_points.type_as(voxel_features).view(-1, 1, 1)
+        f_cluster = voxel_features[:, :, :3] - points_mean
+
+        f_center = torch.zeros_like(voxel_features[:, :, :3])
+        f_center[:, :, 0] = voxel_features[:, :, 0] - (coords[:, 3].to(voxel_features.dtype).unsqueeze(1) * self.voxel_x + self.x_offset)
+        f_center[:, :, 1] = voxel_features[:, :, 1] - (coords[:, 2].to(voxel_features.dtype).unsqueeze(1) * self.voxel_y + self.y_offset)
+        f_center[:, :, 2] = voxel_features[:, :, 2] - (coords[:, 1].to(voxel_features.dtype).unsqueeze(1) * self.voxel_z + self.z_offset)
+
+        if self.use_absolute_xyz:
+            features = [voxel_features, f_cluster, f_center]
+        else:
+            features = [voxel_features[..., 3:], f_cluster, f_center]
+
+        if self.with_distance:
+            points_dist = torch.norm(voxel_features[:, :, :3], 2, 2, keepdim=True)
+            features.append(points_dist)
+        features = torch.cat(features, dim=-1)
+
+        voxel_count = features.shape[1]
+        mask = self.get_paddings_indicator(voxel_num_points, voxel_count, axis=0)
+        mask = torch.unsqueeze(mask, -1).type_as(voxel_features)
+        features *= mask
+        for pfn in self.pfn_layers:
+            features = pfn(features)    # PFN layer 将 (D, P, N) -> (C, P, N)
+        features = features.squeeze()
+        batch_dict['pillar_features'] = features
+        return batch_dict
+
+其中的 PFNLayer 如下（pillar_vfe.py:8）：
+
+    class PFNLayer(nn.Module):
+        def __init__(self,
+                    in_channels,
+                    out_channels,
+                    use_norm=True,
+                    last_layer=False):
+            super().__init__()
+            
+            self.last_vfe = last_layer
+            self.use_norm = use_norm
+            if not self.last_vfe:
+                out_channels = out_channels // 2
+
+            if self.use_norm:
+                self.linear = nn.Linear(in_channels, out_channels, bias=False)
+                self.norm = nn.BatchNorm1d(out_channels, eps=1e-3, momentum=0.01)
+            else:
+                self.linear = nn.Linear(in_channels, out_channels, bias=True)
+
+            self.part = 50000
+
+        def forward(self, inputs):
+            if inputs.shape[0] > self.part:
+                # nn.Linear performs randomly when batch size is too large
+                num_parts = inputs.shape[0] // self.part
+                part_linear_out = [self.linear(inputs[num_part*self.part:(num_part+1)*self.part])
+                                for num_part in range(num_parts+1)]
+                x = torch.cat(part_linear_out, dim=0)
+            else:
+                x = self.linear(inputs)
+            torch.backends.cudnn.enabled = False
+            x = self.norm(x.permute(0, 2, 1)).permute(0, 2, 1) if self.use_norm else x
+            torch.backends.cudnn.enabled = True
+            x = F.relu(x)
+            x_max = torch.max(x, dim=1, keepdim=True)[0]
+
+            if self.last_vfe:
+                return x_max
+            else:
+                x_repeat = x_max.repeat(1, inputs.shape[1], 1)
+                x_concatenated = torch.cat([x, x_repeat], dim=2)
+                return x_concatenated
+
+* 将上述伪图像生成过程导出 onnx 模型，并可视化模型结果图如下：
+![PFN_onnx结构](img/PFN_onnx结构.jpg)
+
+
+3.3.2.2 Backbone Encoder特征提取
+
+Backbone 有两个子网络：一个 top-down 的网络逐步降采样产生特征，第二个网络执行上采样和 top-down 特征的 concat。
+
+>top-down 网络可以用一系列块 Block(S,L,F) 来表征。每个 block 的 stride = S（相对于原始输入伪图像）。一个 block 有 L 个 3x3 2D conv 层和 F 个输出通道，每层后跟 BatchNorm 和 ReLU。
+>>层内的第一个卷积 stride = S / Sin 以确保块在接收到 stride = Sin 的输入 blob 后在 stride = S 上运行, 一个 block 中的所有后续卷积的 stride = 1。
+
+>每个 top-down 的最终特征通过上采样和 concat 进行组合。
+>>首先，对特征进行上采样，从初始步长 Up(Sin,Sout,F) 到最终 stride = Sout（两者都相对于原始伪图像）使用通道数 F 的转置卷积(__ConvTranspose__)。接下来应用 BatchNorm 和 ReLU。最终输出特征是源自不同 stride 的所有特征的 concat
+
+以上便完成了 Backbone 特征提取过程，论文图示如下：
+![backbone论文](img/backbone论文.png)
+
+
+__在OpenPCdet中的实现如下：__
+
+Backbone 的网络实现（base_bev_backbone.py:6）：
+
+    class BaseBEVBackbone(nn.Module):
+        def __init__(self, model_cfg, input_channels):
+            super().__init__()
+            self.model_cfg = model_cfg
+
+            if self.model_cfg.get('LAYER_NUMS', None) is not None:
+                assert len(self.model_cfg.LAYER_NUMS) == len(self.model_cfg.LAYER_STRIDES) == len(self.model_cfg.NUM_FILTERS)
+                layer_nums = self.model_cfg.LAYER_NUMS
+                layer_strides = self.model_cfg.LAYER_STRIDES
+                num_filters = self.model_cfg.NUM_FILTERS
+            else:
+                layer_nums = layer_strides = num_filters = []
+
+            if self.model_cfg.get('UPSAMPLE_STRIDES', None) is not None:
+                assert len(self.model_cfg.UPSAMPLE_STRIDES) == len(self.model_cfg.NUM_UPSAMPLE_FILTERS)
+                num_upsample_filters = self.model_cfg.NUM_UPSAMPLE_FILTERS
+                upsample_strides = self.model_cfg.UPSAMPLE_STRIDES
+            else:
+                upsample_strides = num_upsample_filters = []
+
+            num_levels = len(layer_nums)
+            c_in_list = [input_channels, *num_filters[:-1]]
+            self.blocks = nn.ModuleList()
+            self.deblocks = nn.ModuleList()
+            for idx in range(num_levels):
+                cur_layers = [
+                    nn.ZeroPad2d(1),
+                    nn.Conv2d(
+                        c_in_list[idx], num_filters[idx], kernel_size=3,
+                        stride=layer_strides[idx], padding=0, bias=False
+                    ),
+                    nn.BatchNorm2d(num_filters[idx], eps=1e-3, momentum=0.01),
+                    nn.ReLU()
+                ]
+                for k in range(layer_nums[idx]):
+                    cur_layers.extend([
+                        nn.Conv2d(num_filters[idx], num_filters[idx], kernel_size=3, padding=1, bias=False),
+                        nn.BatchNorm2d(num_filters[idx], eps=1e-3, momentum=0.01),
+                        nn.ReLU()
+                    ])
+                self.blocks.append(nn.Sequential(*cur_layers))
+                if len(upsample_strides) > 0:
+                    stride = upsample_strides[idx]
+                    if stride >= 1:
+                        self.deblocks.append(nn.Sequential(
+                            nn.ConvTranspose2d(
+                                num_filters[idx], num_upsample_filters[idx],
+                                upsample_strides[idx],
+                                stride=upsample_strides[idx], bias=False
+                            ),
+                            nn.BatchNorm2d(num_upsample_filters[idx], eps=1e-3, momentum=0.01),
+                            nn.ReLU()
+                        ))
+                    else:
+                        stride = np.round(1 / stride).astype(np.int)
+                        self.deblocks.append(nn.Sequential(
+                            nn.Conv2d(
+                                num_filters[idx], num_upsample_filters[idx],
+                                stride,
+                                stride=stride, bias=False
+                            ),
+                            nn.BatchNorm2d(num_upsample_filters[idx], eps=1e-3, momentum=0.01),
+                            nn.ReLU()
+                        ))
+
+            c_in = sum(num_upsample_filters)
+            if len(upsample_strides) > num_levels:
+                self.deblocks.append(nn.Sequential(
+                    nn.ConvTranspose2d(c_in, c_in, upsample_strides[-1], stride=upsample_strides[-1], bias=False),
+                    nn.BatchNorm2d(c_in, eps=1e-3, momentum=0.01),
+                    nn.ReLU(),
+                ))
+
+            self.num_bev_features = c_in
+
+        def forward(self, data_dict):
+            """
+            Args:
+                data_dict:
+                    spatial_features
+            Returns:
+            """
+            spatial_features = data_dict['spatial_features']
+            ups = []
+            ret_dict = {}
+            x = spatial_features
+            for i in range(len(self.blocks)):
+                x = self.blocks[i](x)
+
+                stride = int(spatial_features.shape[2] / x.shape[2])
+                ret_dict['spatial_features_%dx' % stride] = x
+                if len(self.deblocks) > 0:
+                    ups.append(self.deblocks[i](x))
+                else:
+                    ups.append(x)
+
+            if len(ups) > 1:
+                x = torch.cat(ups, dim=1)
+            elif len(ups) == 1:
+                x = ups[0]
+
+            if len(self.deblocks) > len(self.blocks):
+                x = self.deblocks[-1](x)
+
+            data_dict['spatial_features_2d'] = x
+
+            return data_dict
+
+
+* 将上述 backbone 部分导出 onnx 模型，并可视化模型结果图如下：
+![backbone_onnx结构](img/backbone_onnx结构.png)
+
