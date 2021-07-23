@@ -642,6 +642,8 @@ $$L = \frac{1}{N_{pos}}(\beta_{loc} L_{loc} + \beta_{cls} L_{cls} + \beta_{dir} 
 1. __定位损失__ $L_{loc}$
     
     3D-box 可以表示为 (x, y, z, w, h, l, $\theta$)，则需要计算的回归值分别是：<br></br>
+    
+https://latex.codecogs.com/gif.latex?\\\Delta x = \frac{x^{gt} - x^a}{d^a},  \Delta y = \frac{y^{gt} - y^a}{d^a},  \Delta z = \frac{z^{gt} - z^a}{h^a}
 
 $$\Delta x = \frac{x^{gt} - x^a}{d^a},  \Delta y = \frac{y^{gt} - y^a}{d^a},  \Delta z = \frac{z^{gt} - z^a}{h^a}$$
 
