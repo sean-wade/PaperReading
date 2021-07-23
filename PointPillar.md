@@ -1,5 +1,35 @@
 # 3D目标检测 —— PointPillars 学习笔记
 
+目录
+- [3D目标检测 —— PointPillars 学习笔记](#3d目标检测--pointpillars-学习笔记)
+  - [一、点云知识](#一点云知识)
+    - [1.1 点云数据特点](#11-点云数据特点)
+    - [1.2 点云数据特征表达](#12-点云数据特征表达)
+      - [1.2.1 BEV图](#121-bev图)
+      - [1.2.2 Camera view图](#122-camera-view图)
+      - [1.2.3 点对点特征(point-wise feature)提取](#123-点对点特征point-wise-feature提取)
+      - [1.2.4 特征融合](#124-特征融合)
+  - [二、Kitti数据集](#二kitti数据集)
+    - [2.1 概述](#21-概述)
+    - [2.2 Labels 标注含义](#22-labels-标注含义)
+    - [2.3 相机坐标系换算](#23-相机坐标系换算)
+  - [三、PointPillars](#三pointpillars)
+    - [3.1 前言](#31-前言)
+    - [3.2 点云目标检测思路介绍](#32-点云目标检测思路介绍)
+      - [3.2.1 生成BEV图](#321-生成bev图)
+      - [3.2.2 Backbone](#322-backbone)
+      - [3.2.3 Detection head](#323-detection-head)
+    - [3.3 PointPillars 介绍](#33-pointpillars-介绍)
+      - [3.3.1 VoxelNet 和 SECOND 算法概述](#331-voxelnet-和-second-算法概述)
+      - [3.3.2 PointPillars 的思路及实现](#332-pointpillars-的思路及实现)
+        - [3.3.2.1 伪图片生成](#3321-伪图片生成)
+        - [3.3.2.2 Backbone Encoder特征提取](#3322-backbone-encoder特征提取)
+        - [3.3.2.3 Detection Head](#3323-detection-head)
+        - [3.3.2.3 Loss 设计](#3323-loss-设计)
+      - [3.3.3 总结](#333-总结)
+
+---
+
 ## 一、点云知识
 
 ### 1.1 点云数据特点
@@ -77,6 +107,8 @@ __因此，在自动驾驶领域，point-wise特征不会直接用来做3D目标
 
 ---
 
+
+
 ## 二、Kitti数据集 
 
 ### 2.1 概述
@@ -130,9 +162,9 @@ calib文件夹下的 txt 文件，描述了各相机之间坐标换算的校准�
 
 
 
-
-
 ---
+
+
 
 ## 三、PointPillars 
 
@@ -162,6 +194,7 @@ calib文件夹下的 txt 文件，描述了各相机之间坐标换算的校准�
         
         self.module_topology = ['vfe', 'backbone_3d', 'map_to_bev_module', 'pfe', 
                                 'backbone_2d', 'dense_head',  'point_head', 'roi_head']
+
 
 #### 3.2.1 生成BEV图
 
@@ -223,6 +256,19 @@ __具体步骤如下：__
 
 
 __在OpenPCdet中的实现如下：__
+
+配置（pointpillar.yaml:53）：
+
+    VFE:
+        NAME: PillarVFE
+        WITH_DISTANCE: False        # 特征编码是否加入距离
+        USE_ABSLOTE_XYZ: True       # 特征编码是否加入xyz绝对值
+        USE_NORM: True              # PFN 层是否加入归一化
+        NUM_FILTERS: [64]           # PFN 层卷积核（各输出feature通道）数
+
+    MAP_TO_BEV:
+        NAME: PointPillarScatter
+        NUM_BEV_FEATURES: 64        # BEV feature 通道数
 
 点云数据 -> 伪图片数据的实现（pillar_vfe.py:104）：
 
@@ -321,6 +367,16 @@ Backbone 有两个子网络：一个 top-down 的网络逐步降采样产生特�
 
 __在OpenPCdet中的实现如下：__
 
+配置（pointpillar.yaml:64）：
+
+    BACKBONE_2D:
+        NAME: BaseBEVBackbone
+        LAYER_NUMS: [3, 5, 5]                   # 各 block 数量
+        LAYER_STRIDES: [2, 2, 2]                # 各 block 下采样倍率(步长)
+        NUM_FILTERS: [64, 128, 256]             # 各 block 卷积核(输出通道)数量
+        UPSAMPLE_STRIDES: [1, 2, 4]             # 上采样的倍率(步长)
+        NUM_UPSAMPLE_FILTERS: [128, 128, 128]   # 上采样的卷积核(输出通道)数量
+            
 Backbone 的网络实现（base_bev_backbone.py:6）：
 
     class BaseBEVBackbone(nn.Module):
@@ -437,6 +493,192 @@ Backbone 的网络实现（base_bev_backbone.py:6）：
 
 
 
-##### 3.3.2.3 
+##### 3.3.2.3 Detection Head
 
+在 PointPillars 中使用 __Single Shot Detector (SSD)__ 设置来执行 3D 目标检测。与 SSD 类似，我们使用 2D Inter-section over Union (IoU) 将先验框与 GroudTruth 匹配。边界框高度不用于匹配，而是作为额外的回归目标单独预测。
+具体的 anchor 设置、根据anchor 分配 ground-truth 等可以参考 SSD 论文，这里不做深入探讨。
+
+__在OpenPCdet中的实现如下：__
+
+配置（pointpillar.yaml:72）：
+
+    DENSE_HEAD:
+        NAME: AnchorHeadSingle
+        CLASS_AGNOSTIC: False           # 模型是否区分类别
+
+        USE_DIRECTION_CLASSIFIER: True  # 模型是否输出目标方向
+        DIR_OFFSET: 0.78539             # 方向偏移量
+        DIR_LIMIT_OFFSET: 0.0           
+        NUM_DIR_BINS: 2                 # 方向数量
+
+        ANCHOR_GENERATOR_CONFIG: [
+            {
+                'class_name': 'Car',
+                'anchor_sizes': [[3.9, 1.6, 1.56]],     # 先验框尺寸(米)
+                'anchor_rotations': [0, 1.57],          # 先验框旋转角度
+                'anchor_bottom_heights': [-1.78],       # 先验框相对于原点高度差
+                'align_center': False,
+                'feature_map_stride': 2,                # 特征图下采样倍率
+                'matched_threshold': 0.6,               # 正样本阈值
+                'unmatched_threshold': 0.45             # 负样本阈值
+            },
+            {
+                'class_name': 'Pedestrian',
+                'anchor_sizes': [[0.8, 0.6, 1.73]],
+                'anchor_rotations': [0, 1.57],
+                'anchor_bottom_heights': [-0.6],
+                'align_center': False,
+                'feature_map_stride': 2,
+                'matched_threshold': 0.5,
+                'unmatched_threshold': 0.35
+            },
+            {
+                'class_name': 'Cyclist',
+                'anchor_sizes': [[1.76, 0.6, 1.73]],
+                'anchor_rotations': [0, 1.57],
+                'anchor_bottom_heights': [-0.6],
+                'align_center': False,
+                'feature_map_stride': 2,
+                'matched_threshold': 0.5,
+                'unmatched_threshold': 0.35
+            }
+        ]
+
+        TARGET_ASSIGNER_CONFIG:
+            NAME: AxisAlignedTargetAssigner
+            POS_FRACTION: -1.0
+            SAMPLE_SIZE: 512                # 训练采样本数量
+            NORM_BY_NUM_EXAMPLES: False     # 是否根据 examples 数量归一化
+            MATCH_HEIGHT: False             # 分配 anchors 时是否考虑高度(使用3D/2D iou)
+            BOX_CODER: ResidualCoder        # 如何根据 gt 生成 box 的回归值
+
+AnchorHeadSingle 的网络实现（anchor_head_single.py:7）：
+
+    class AnchorHeadSingle(AnchorHeadTemplate):
+        def __init__(self, model_cfg, input_channels, num_class, class_names, grid_size, point_cloud_range,
+                    predict_boxes_when_training=True, **kwargs):
+            super().__init__(
+                model_cfg=model_cfg, 
+                num_class=num_class, 
+                class_names=class_names, 
+                grid_size=grid_size, 
+                point_cloud_range=point_cloud_range,
+                predict_boxes_when_training=predict_boxes_when_training
+            )
+
+            self.num_anchors_per_location = sum(self.num_anchors_per_location)
+
+            self.conv_cls = nn.Conv2d(
+                input_channels, self.num_anchors_per_location * self.num_class,    
+                kernel_size=1
+            )
+            self.conv_box = nn.Conv2d(
+                input_channels, self.num_anchors_per_location * self.box_coder.code_size,
+                kernel_size=1
+            )
+
+            if self.model_cfg.get('USE_DIRECTION_CLASSIFIER', None) is not None:
+                self.conv_dir_cls = nn.Conv2d(
+                    input_channels,
+                    self.num_anchors_per_location * self.model_cfg.NUM_DIR_BINS,    
+                    kernel_size=1
+                )
+            else:
+                self.conv_dir_cls = None
+            self.init_weights()
+
+        def forward(self, data_dict):
+            spatial_features_2d = data_dict['spatial_features_2d']
+
+            cls_preds = self.conv_cls(spatial_features_2d)
+            box_preds = self.conv_box(spatial_features_2d)
+
+            cls_preds = cls_preds.permute(0, 2, 3, 1).contiguous()  # [N, H, W, C]
+            box_preds = box_preds.permute(0, 2, 3, 1).contiguous()  # [N, H, W, C]
+
+            self.forward_ret_dict['cls_preds'] = cls_preds
+            self.forward_ret_dict['box_preds'] = box_preds
+
+            if self.conv_dir_cls is not None:
+                dir_cls_preds = self.conv_dir_cls(spatial_features_2d)
+                dir_cls_preds = dir_cls_preds.permute(0, 2, 3, 1).contiguous()
+                self.forward_ret_dict['dir_cls_preds'] = dir_cls_preds
+            else:
+                dir_cls_preds = None
+
+            if self.training:
+                targets_dict = self.assign_targets(
+                    gt_boxes=data_dict['gt_boxes']
+                )
+                self.forward_ret_dict.update(targets_dict)
+
+            if not self.training or self.predict_boxes_when_training:
+                batch_cls_preds, batch_box_preds = self.generate_predicted_boxes(
+                    batch_size=data_dict['batch_size'],
+                    cls_preds=cls_preds, box_preds=box_preds, dir_cls_preds=dir_cls_preds
+                )
+                data_dict['batch_cls_preds'] = batch_cls_preds
+                data_dict['batch_box_preds'] = batch_box_preds
+                data_dict['cls_preds_normalized'] = False
+
+            return data_dict
+
+
+
+* 将上述 backbone 部分导出 onnx 模型，并可视化模型结果图如下：
+![D_head_onnx结构](img/D_head_onnx结构.png)
+
+
+##### 3.3.2.3 Loss 设计
+
+_PointPillars_ 的 Loss 设计和 _SECOND_ 论文中的一样，主要分为三部分：定位 Loss，方向 Loss 和分类 Loss，损失函数表达式如下：
+
+$$L = \frac{1}{N_{pos}}(\beta_{loc} L_{loc} + \beta_{cls} L_{cls} + \beta_{dir} L_{dir})$$  
+
+其中，$N_{pos}$ 表示为正样本的 anchors 数量，$\beta_{loc}$=2，$\beta_{cls}$=1，$\beta_{dir}$=0.2    <br></br>
+
+
+
+1. __定位损失__ $L_{loc}$
+    
+    3D-box 可以表示为 (x, y, z, w, h, l, $\theta$)，则需要计算的回归值分别是：<br></br>
+
+$$\Delta x = \frac{x^{gt} - x^a}{d^a},  \Delta y = \frac{y^{gt} - y^a}{d^a},  \Delta z = \frac{z^{gt} - z^a}{h^a}$$
+
+$$\Delta w = \log{\frac{w^{gt}}{w^a}}, \Delta l = \log{\frac{l^{gt}}{l^a}}, \Delta h = \log{\frac{h^{gt}}{h^a}}$$
+    <!--  -->
+$$\Delta \theta = \sin(\theta^{gt} - \theta^a)$$
+
+其中  $  d^a = \sqrt {(w^a)^2 + (l^a)^2}$  代表 anchor 的对角线，而最终的定位 Loss 如下：
+
+$$ L_{loc} = \sum_{b\in(x,y,z,w,l,h,\theta)}SmoothL1(\Delta b) $$
+
+
+2. __分类损失__ $L_{cls}$
+    目标检测的分类 loss 使用 focal loss，比如在point pillar中:
+$$L_{cls} = -\alpha_a(1 - p^a)^{\gamma}\log{p^a}$$
+    其中 $p^a$ 是一个 anchor 的 class probability，$\alpha=0.25, \gamma=2$ <br></br>
+
+3. __方向损失__ $L_{dir}$
+    由于 定位损失 $L_{loc}$ 不能区分 box 的 $\pm\pi$， 所以加上方向损失，它直接采用 Softmax 分类形式。
+
+
+__在OpenPCdet中的实现如下：__
+
+配置（pointpillar.yaml:122）：
+
+        LOSS_CONFIG:
+            LOSS_WEIGHTS: {
+                'cls_weight': 1.0,      # 分类权重
+                'loc_weight': 2.0,      # 定位权重
+                'dir_weight': 0.2,      # 方向权重
+                'code_weights': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]     # 3D-box 各值权重
+            }
+
+
+
+#### 3.3.3 总结
+_Pointpillars_ 是在 _SECOND_ 上的一个扩展，很多操作都借鉴了 _SECOND_，其主要贡献在于 "Fast Encoder", 也就是用 Pillar 来表征点云，全程只需 2D卷积即可用于 3D点云检测，大大提升了检测速度，其速度超过 _SECOND_ 三倍。但是 105Hz 这样的运行时间可能会被认为是过快的，因为激光雷达的工作频率通常是20Hz。不过论文中的时间是基于高性能GPU上的时间，如果真实自动驾驶场景会使用嵌入式GPU，势必导致运行时间增加，因此其在工业上具有重要意义。模型训练上，针对 car 单独训一个模型，ped 和 cyc 单独训一个模型，loss 上用 softmax 增加了 180 度方向混淆的约束。数据增强上也借鉴了 _SECOND_ 的方法。整体 mAP 上相比 _VoxelNet_ 还是有很大提升的。
+
+Pillar编码方式可以作为一个组件用于其他的3D目标检测网络当中，例如 anchor free 的 CenterPoint等，而 _Pointpillars_ 本身也有很多可以优化的地方，比如 Loss 设计、需要手动设置参数 prior box等。
 
